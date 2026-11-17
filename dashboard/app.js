@@ -14,6 +14,14 @@
   var app = document.getElementById('board');
   var state = { q: '', category: 'all', chain: 'all', tab: 'pre-token', sort: 'implied', dir: -1, selected: null };
 
+  // The formatters: every number on the page goes through one of these, so a value means the
+  // same thing wherever it appears. Large money is shortened to billions, millions and
+  // thousands with two, one and zero decimals respectively, because a board of 226 rows is
+  // unreadable at full precision; the detail drawer still shows the exact figure where it
+  // matters. A missing number is never rendered as zero — it is "n/a" — because zero would be
+  // a claim, and a missing seven-day change is not a flat week, it is a week the index never
+  // reported. Ages are shown in years once they pass a year and in days before that, which
+  // keeps the young protocols (the ones the radar cares about most) readable at a glance.
   var usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
   function fmtUsd(n) {
     if (n === null || n === undefined || !isFinite(n)) return 'n/a';
@@ -52,6 +60,15 @@
     return Math.max(1, Math.round(row.tvl_usd * model.base_multiple * growthMult * maturity * chains));
   }
 
+  // The element builder: one small helper that builds the whole page out of calls instead of
+  // templates. A tag, an attributes object, then any number of children. The attributes use
+  // short keys — "class" for the class name, "text" for plain text, "html" only where markup
+  // is intended, "on..." for event handlers — so a call site reads like the element it makes.
+  // Children may be strings, nodes, nulls or arrays, and nulls are skipped, which is what lets
+  // the table code pass a conditional element (a sort arrow, a selected marker) without an
+  // if statement around the call. Everything the page shows is built by this one function,
+  // which is why there is no innerHTML anywhere except the single "html" key: text is always
+  // set as text, so a protocol name can never inject markup into the page.
   function el(tag, attrs) {
     var node = document.createElement(tag);
     if (attrs) {
@@ -151,6 +168,16 @@
     return steps.map(stepText);
   }
 
+  // Hash state: the board's state lives in the URL fragment, so a filtered view is a link.
+  // Search text, the selected protocol, the category, the chain and the tab are all written
+  // into the hash on every change, and read back on load. That makes a view shareable — send
+  // someone a link and they see the same filtered board — and it makes the back button work
+  // the way a reader expects, because the browser treats each hash change as a history entry
+  // only when the page is navigated, not on replaceState. The fragment is deliberately the
+  // whole state and nothing else: there is no state kept only in memory, so a reload never
+  // loses the view, and the detail drawer reopens from the hash when a shared link names a
+  // protocol. A hash that names nothing, or names a protocol that is not on the board, is
+  // simply ignored rather than erroring.
   function readHash() {
     var hash = window.location.hash.replace(/^#/, '');
     if (!hash) return;
@@ -377,6 +404,19 @@
   var dialog = el('dialog', { class: 'detail', id: 'detail', 'aria-labelledby': 'detail-title' });
   dialog.addEventListener('close', function () { state.selected = null; writeHash(); });
 
+  // The detail drawer: one protocol, its whole model, its whole farm plan.
+  //
+  // Opening a row does three things, in order. It finds the row, and if the slug is not on
+  // the board it does nothing — a stale hash or a mistyped link must not open an empty drawer.
+  // It recomputes the row's implied value from the snapshot figures with impliedOf, the same
+  // arithmetic lib/model.ts runs, and prints the recomputed number next to the board's number:
+  // if the two agree the data is fresh, and if they ever disagreed the drawer would say so in
+  // plain words instead of silently showing a stale figure. Then it renders the farm plan by
+  // running the same derivation the model runs — category, chains, TVL and age decide the
+  // action, the capital, the hold and every cost and time — so the plan in the drawer and the
+  // plan in board.json are the same plan, generated twice from the same rules rather than
+  // copied once and left to drift. The drawer is a native dialog element, so Escape closes it
+  // and focus is trapped while it is open; closing it clears the selected slug from the hash.
   function openDetail(slug) {
     var row = DATA.rows.filter(function (r) { return r.slug === slug; })[0];
     if (!row) return;
@@ -423,6 +463,18 @@
     }
   }
 
+  // Render: rebuild the shell from the current state, every time, from scratch.
+  //
+  // There is no incremental update here and that is deliberate. The board is 226 rows, the
+  // whole page rebuilds in a few milliseconds, and rebuilding from scratch means the page
+  // can never show a stale combination of state — a filter applied to yesterday's rows, a
+  // sort arrow pointing at a column that is no longer sorted. Each render clears the mount
+  // point, builds the header, the lede, the top three cards (pre-token tab only), the
+  // controls, the table for the active tab, and the model panel (pre-token tab only), then
+  // re-attaches the dialog if it is not already in the document and reopens the selected
+  // protocol's drawer if the hash names one. Sorting is a pure function of the state and the
+  // data — the same state always renders the same page — and the tie-break is the slug, so
+  // two rows with equal values never swap places between renders.
   function render() {
     app.textContent = '';
     var shell = el('div', { class: 'shell' });

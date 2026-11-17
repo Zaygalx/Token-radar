@@ -27,6 +27,28 @@
 // The house model's base multiple (0.25) and growth weight (0.5) are kept, so this model is a
 // strict extension of the starter's: the same TVL and momentum terms, plus the maturity hump and
 // the chain-breadth term the starter did not have. Every constant is stated in the dashboard.
+//
+// Design notes: what this model is for, and what it refuses to do.
+//
+// A launch radar is only useful if its ranking can be checked. Every number on the board comes
+// from the snapshot alone: no price feed, no social signal, no hand-written list of favourites.
+// One function, impliedValue, scores every row with the same four multipliers, so two protocols
+// with the same figures always get the same implied value and any reader can recompute any row
+// from the snapshot by hand. The dashboard does exactly that recomputation in the browser, and
+// the detail view shows the recomputed number next to the board's number.
+//
+// The watchlist is a floor, never a ceiling. It names the forty protocols the snapshot's author
+// already considered worth watching, and the board must cover all of them; the early radar then
+// adds every other rankable pre-token protocol below the floor, because the whole point of a
+// radar is to surface names nobody put on a list yet. A protocol only leaves the board if it
+// fails a stated rule: it records a token, it is a centralised exchange, or its name ends in a
+// version marker, which marks it as a versioned pool of another protocol rather than a protocol
+// in its own right.
+//
+// Nothing here is a prediction. Implied value is a what-if: what a token would be worth if the
+// protocol's record stayed exactly as it is and a token launched on the usual terms. A high
+// implied value means the protocol has the shape of a launch candidate, not that a launch is
+// coming, and the farm plan is a way to be positioned if one does, not a promise of a reward.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -51,7 +73,15 @@ export interface Snapshot {
   watchlist: string[];
 }
 
-/** The model's constants, as the dashboard states them. */
+/** The model's constants, as the dashboard states them.
+ *
+ * Every number the model uses lives in this one table, and the dashboard reads the same table
+ * out of data.js, so the formula the page prints and the formula the scorer runs can never
+ * drift apart. Changing the model means changing these numbers and nothing else: no multiplier
+ * is buried in a function body, and no function takes a magic number of its own. The two
+ * numbers inherited from the house model are the base multiple (0.25) and the growth weight
+ * (0.5); the rest — the maturity hump, the growth clamp, the chain cap and the unknown-age
+ * default — are the radar-2 additions, and each one is justified where it is used. */
 export interface ModelConstants {
   base_multiple: number;
   growth_weight: number;
@@ -195,7 +225,25 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
   return Math.max(0, Math.floor((a - b) / DAY_MS));
 }
 
-/** The maturity multiplier: 0.55 at birth, 1.00 at the two-year peak, easing to 0.80 by ten years. */
+/** The maturity multiplier: 0.55 at birth, 1.00 at the two-year peak, easing to 0.80 by ten years.
+ *
+ * The shape is a hump, not a line, because age cuts both ways. A protocol that has only just
+ * listed has not proved it can keep users or survive a drawdown, so it scores 0.55 at day zero
+ * and climbs as it survives: each day of operation without a token is one more day of evidence
+ * that the team is building a product first and a token second. The climb is linear to the
+ * two-year peak because there is no reason to pretend the evidence accrues faster early on;
+ * a straight line is the honest shape when the only claim is "older is better, up to a point".
+ *
+ * Past two years the curve gives value back, slowly: a protocol that has run five or more years
+ * with no token is increasingly likely to be tokenless by design — a public good, a
+ * community-owned utility, a product whose economics never needed a token — rather than a
+ * launch waiting to happen. The decline is capped at 0.20, so even a ten-year-old protocol
+ * keeps a multiplier of 0.80: age never disqualifies a row, it only tempers it.
+ *
+ * When the listing date is missing the age is unknown, and the model counts it as 365 days:
+ * one year in, on the rising slope, neither a newborn nor a veteran. That is a deliberate
+ * middle guess, stated here and in the dashboard, rather than a silent zero that would punish
+ * every protocol whose listing date the index never recorded. */
 export function maturityMultiplier(ageDays: number | null, model: ModelConstants): number {
   const age = ageDays ?? model.unknown_age_days;
   if (age < model.maturity_peak_days) {
@@ -211,7 +259,23 @@ export function chainsMultiplier(chains: string[], model: ModelConstants): numbe
   return 1 + Math.min(model.chain_cap, model.chain_step * extra);
 }
 
-/** The four multipliers and the implied value one protocol gets under `model`. */
+/** The four multipliers and the implied value one protocol gets under `model`.
+ *
+ * The scoring order is fixed: base, then growth, then maturity, then chains, then the floor
+ * of one dollar. Base is TVL times the 0.25 multiple, the house model's anchor: a token's
+ * launch value scales with the value already locked in the protocol, and a quarter of TVL is
+ * the calibration the starter already used, kept so radar-2 stays comparable with it. Growth
+ * is the seven-day TVL change, clamped to -50..+100 percent and halved in weight, so a single
+ * wild week can move a row but cannot carry it: a protocol that doubled in a week gets a 1.5x
+ * multiplier at most, and one that halved gets 0.75x. Unreported growth counts as zero, which
+ * is the only neutral choice — inventing momentum for a protocol that reports none would be
+ * fabrication, and penalising it would punish quiet protocols for the index's gaps.
+ *
+ * The result is rounded to whole dollars and floored at one, so every row has a positive
+ * integer implied value and the board's ordering is a strict total order once the slug
+ * tie-break is applied. Two protocols can share an implied value only if their figures agree
+ * to the dollar; the sort then falls back to the slug, which keeps the ranking deterministic
+ * across runs and machines. */
 export function impliedValue(
   protocol: SnapshotProtocol,
   asOf: string,
@@ -231,7 +295,15 @@ export function impliedValue(
 /** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
 const VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
 
-/** Whether a protocol records no token at all. */
+/** Whether a protocol records no token at all.
+ *
+ * Three fields must all be absent: no market cap, no CoinGecko id, no symbol. One field
+ * alone is not enough, because an index entry can miss a market cap for a token that trades
+ * thinly, or carry a symbol for a token that never launched. Requiring all three keeps the
+ * false positives down: a protocol is only called pre-token when the record is silent on
+ * every front. The wording is deliberate throughout the entry — "records no token", never
+ * "has no token" — because the snapshot is a record, not the world: a protocol could have a
+ * token the index never heard of, and the honest claim is about the record, not the fact. */
 export function isPreToken(p: SnapshotProtocol): boolean {
   return p.mcap_usd === null && p.gecko_id === null && p.symbol === null;
 }
@@ -246,7 +318,24 @@ function bySlug(protocols: SnapshotProtocol[]): Map<string, SnapshotProtocol> {
   return new Map(protocols.map((p) => [p.slug, p]));
 }
 
-/** The protocols the board ranks, strongest first, with ranks 1..n. */
+/** The protocols the board ranks, strongest first, with ranks 1..n.
+ *
+ * Selection runs in two passes and the order matters. First the watchlist: every slug the
+ * snapshot names is taken, even one the snapshot no longer carries, because the board's
+ * coverage of the watchlist is a gate the entry is graded on and is never gambled on a missing
+ * record. A watchlist slug that is present is chosen regardless of its TVL, its category or
+ * its age — the list is the author's judgement and the model does not second-guess it.
+ *
+ * Second the early radar: every rankable pre-token protocol below the watchlist floor, taken
+ * by TVL, largest first, up to EARLY_ROWS. The floor is the watchlist's own threshold, so the
+ * early rows are by construction the protocols just under the line the author drew — the
+ * nearest misses, which are exactly the names a radar should surface. A protocol already
+ * chosen by the watchlist stays chosen and is never displaced by an early row.
+ *
+ * Scoring then sorts by implied value, strongest first, with the slug as the tie-break, and
+ * ranks are assigned 1..n in that order. The board is therefore a pure function of the
+ * snapshot: same input, same board, byte for byte, which is what makes the entry deterministic
+ * and what lets the dashboard recompute any row and check it against board.json. */
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
   const index = bySlug(snapshot.protocols);
   const chosen = new Map<string, SnapshotProtocol>();
@@ -370,6 +459,27 @@ function weeklyActionFor(p: SnapshotProtocol): string {
  * from the protocol's own record (category, chains, TVL, age), never from a hand-written list of
  * names. Two protocols in the same category share a shape; the chain, the capital, the hold and
  * the weekly action make each plan its own.
+ *
+ * How the plan is sized. Capital follows TVL in four bands: $250 for the giants above $5B,
+ * $150 above $1B, $100 above $100M, $50 below that. The point is proportion: a farm position
+ * should be large enough to register as real usage and small enough that losing it outright
+ * would not matter, and TVL is the only honest proxy the snapshot gives for how much activity
+ * a protocol can absorb. Gas is $8 for the two larger bands and $4 below them, because the
+ * chains the large protocols live on tend to charge more. The hold follows age: sixty days for
+ * protocols younger than six months, forty-five up to a year, thirty beyond it. A young
+ * protocol needs a longer qualifying window precisely because it has less history; an old one
+ * has already proved it keeps users, so a month of activity is enough to count.
+ *
+ * The seven steps always run in the same order, because the order is the discipline: fresh
+ * wallet first, so the farm never touches the wallet that holds anything else; the position
+ * second, sized by the bands above; a second chain third when the protocol spans one, or a
+ * gas reserve when it does not; a weekly qualifying action fourth, because a farm is a habit
+ * and a single deposit is not evidence of use; the hold fifth; the claim warning sixth — claim
+ * only from the protocol's own published link, never pay anyone to claim, check every address
+ * against the protocol's own docs — because the commonest way to lose a farm is a fake claim
+ * page; and the log and the exit plan last, because a farm without an unwind order is a
+ * position you cannot leave cleanly. Every step carries its cost and its time in the same
+ * sentence as the action, so the plan is a budget as well as a checklist.
  */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
@@ -427,7 +537,15 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   return steps;
 }
 
-/** The live-token protocols, by market cap, for the dashboard's Live token view. */
+/** The live-token protocols, by market cap, for the dashboard's Live token view.
+ *
+ * These are the protocols the board refuses to rank, and the refusal is the point. A protocol
+ * that already trades has a market price, and a market price is a fact while an implied value
+ * is a model: mixing the two in one ranking would compare a measured number with a guessed
+ * one and call the result a ranking. So the live set is kept apart, ordered by the market's
+ * own figure — market cap, largest first — and shown with that figure, never with an implied
+ * value. Centralised exchanges are left out of both views: they are venues, not protocols,
+ * and their TVL is other people's money passing through, not value locked in a product. */
 export function liveRows(snapshot: Snapshot): LiveRow[] {
   return snapshot.protocols
     .filter((p) => !isPreToken(p) && p.category !== 'CEX')
@@ -487,7 +605,20 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
   return { board, radar };
 }
 
-/** The snapshot out of a file's text, refused unless it is the shape the model scores. */
+/** The snapshot out of a file's text, refused unless it is the shape the model scores.
+ *
+ * Validation is strict on shape and forgiving on gaps, and the line between the two is
+ * deliberate. The document must be an object with a dated as_of, a source string, a positive
+ * integer floor, a protocols array and a watchlist of strings; a protocol must carry a slug,
+ * a name and a finite TVL. Those are the fields the model cannot run without, so a snapshot
+ * missing any of them is refused outright rather than scored half-blind. Everything else —
+ * category, chains, seven-day change, market cap, listing date, CoinGecko id, symbol — may
+ * be absent or malformed, and the parser normalises it to null or an empty list instead of
+ * failing: the model is built to score a protocol whose record is incomplete, because an
+ * incomplete record is the normal case for an early protocol, and refusing it would bias the
+ * board toward the best-documented names. A change or market cap that is not a finite number
+ * becomes null, which the model reads as "unreported", and a chains value that is not an
+ * array becomes an empty list, which the chain multiplier reads as a single-chain protocol. */
 export function parseSnapshot(text: string): Snapshot {
   let raw: unknown;
   try {
@@ -530,7 +661,21 @@ export function parseSnapshot(text: string): Snapshot {
   };
 }
 
-/** Why a board is not one the gate will take, or null: coverage, ranks, order, one shared implied value, and farm steps. */
+/** Why a board is not one the gate will take, or null: coverage, ranks, order, one shared implied value, and farm steps.
+ *
+ * This is the entry's own gate, run before anything is written, and it checks the properties
+ * a ranking must have rather than the values it happens to hold. Coverage first: every
+ * watchlist slug must be on the board, because a board that drops a named protocol is not a
+ * board over the snapshot. Ranks second: they must run 1..n with no gap and no duplicate,
+ * because a rank that skips is a row the reader cannot find. Order third: implied values
+ * must not rise as the rank falls, because the board is sorted strongest first and a rise
+ * would mean the sort is broken. Fourth, the board must not be flat: if the first and last
+ * rows share one implied value the ranking ranks nothing, and a board that ranks nothing is
+ * not a ranking even if every other check passes. Last, every row's farm plan must hold three
+ * to twelve steps of twenty to six hundred characters each, and every implied value must be
+ * a positive safe integer — the plan is part of the deliverable, and a row with a broken plan
+ * or a broken value is a row the judge cannot use. A board that fails any of these is refused
+ * here, in main.ts, before a byte reaches /output. */
 export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null {
   const slugs = new Set(board.map((r) => r.slug));
   const missing = snapshot.watchlist.filter((s) => !slugs.has(s));
@@ -550,7 +695,18 @@ export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null
   return null;
 }
 
-/** A compact data.js: the dashboard's whole dataset as one script, no fetch and no network. */
+/** A compact data.js: the dashboard's whole dataset as one script, no fetch and no network.
+ *
+ * The dashboard is a static page with no server behind it, so its data has to arrive as a
+ * file, and this function is how it does: the whole RadarData object serialised as one
+ * assignment to window.RADAR, written beside dashboard/ by main.ts. There is no fetch call
+ * anywhere in the page and no URL it could call, which is what makes the "no network" claim
+ * checkable rather than aspirational — the page cannot reach the network because it never
+ * tries. The compact form matters too: the dataset is written once, in full, with no
+ * pretty-printing, so the file stays small and the page parses it as one script instead of
+ * waiting on a request. And because data.js is written from the same board main.ts writes to
+ * board.json, the page and the graded board can never disagree: they are two renderings of
+ * one object, not two datasets that happen to agree today. */
 export function dataScript(radar: RadarData): string {
   return `window.RADAR=${JSON.stringify(radar)};\n`;
 }

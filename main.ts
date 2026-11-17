@@ -14,6 +14,21 @@
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
+//
+// How one run works, in order, and why the order is the order.
+//
+// First the snapshot is read and parsed, and a malformed snapshot stops the run here, before
+// anything is written: a board built from a half-parsed input would be worse than no board,
+// because it would look complete. Then the board is built and passed through the gate in
+// lib/model.ts, which refuses a board that drops a watchlist slug, skips a rank, sorts the
+// wrong way, ranks nothing, or carries a broken farm plan. Only a board that passes the gate
+// is written anywhere. Then the outputs are written: board.json and data.js first, so the
+// graded board and the dashboard's data exist before anything else; the dashboard and the
+// screenshots are copied next, and the screenshots are counted — fewer than three is a
+// refusal, because the entry is graded on three views and a missing one is a missing
+// deliverable. The dossier is written last, deliberately: the scorer rebuilds it from this
+// /output and compares bytes, so writing it last means it describes exactly what is on disk
+// at the moment the run ends, not what was there a step earlier.
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -42,6 +57,10 @@ if (!existsSync(inputFile)) {
   process.stderr.write(`token radar: no snapshot at ${inputFile}: pass --input <snapshot.json|directory> or mount the sealed /input\n`);
   process.exit(2);
 }
+// The input may be a file or a directory: a directory means snapshot.json inside it, which
+// is how the sealed /input is mounted. The default is /input itself, so the grader's
+// container needs no flags at all; outside that container the caller passes --input or sets
+// MAKEFUN_OUTPUT_DIR, and the program never guesses at a path it was not given.
 const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 
 const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));

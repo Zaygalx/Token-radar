@@ -49,6 +49,11 @@ a { color: var(--accent); }
 .skip:focus { left: var(--step-4); top: var(--step-4); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* The shell: one centred column, wide enough for a seven-column table and narrow enough to
+   read. The side padding is generous on a desktop so the board never touches the viewport
+   edge, and the vertical rhythm comes from the same spacing steps the whole page uses, so
+   every gap is one of 4, 8, 12, 16, 24, 32 or 48 pixels and the page holds together visually
+   without a single one-off margin. */
 .shell { max-width: 1320px; margin: 0 auto; padding: var(--step-5) var(--step-6) var(--step-7); }
 .top {
   display: flex; align-items: flex-start; justify-content: space-between; gap: var(--step-5);
@@ -91,6 +96,14 @@ a { color: var(--accent); }
 .tabs button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
 .count { margin-left: auto; color: var(--muted); font-size: 13px; align-self: center; }
 
+/* Panels and tables: every surface the board shows is a white panel with a hairline border
+   and a 14px radius, so the page reads as a stack of cards rather than a wall of text. The
+   table itself is full-width with collapsed borders and a hairline between rows; a row is a
+   button in all but name — pointer cursor, hover tint, and a persistent tint while its
+   detail drawer is open — because the whole row opens the protocol. Numbers are set in
+   tabular figures so a column of dollar values lines up digit under digit instead of
+   jittering, and the implied-value bar is a thin track whose fill is proportional to the
+   strongest row on screen, so the eye can compare rows without reading a single number. */
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel); overflow: hidden; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -128,6 +141,14 @@ tbody tr[data-selected="true"] { background: var(--accent-soft); }
 .button { min-height: 36px; padding: 0 var(--step-4); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
 .button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
 
+/* The detail drawer: a fixed panel pinned to the right edge, as wide as a page of reading
+   and no wider, scrolling on its own so the board behind it stays put. It is a native dialog
+   element, so the browser gives it a backdrop and an Escape key for free, and the backdrop is
+   a translucent dark wash that dims the board just enough to say "this is the foreground"
+   without hiding it. The drawer is laid out as a head, then sections divided by hairlines:
+   the implied-value equation first, with each input on its own row and the total ruled off
+   above it, then the farm plan as a numbered list whose cost and time are set in monospace
+   beneath each action, so a plan reads as a checklist rather than a paragraph. */
 .detail {
   position: fixed; top: 0; right: 0; bottom: 0; width: min(540px, 94vw); z-index: 10;
   background: var(--surface); border-left: 1px solid var(--border); padding: var(--step-5);

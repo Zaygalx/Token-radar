@@ -7,6 +7,13 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
+<!-- The page is a shell and two scripts, nothing else. The mount point is the empty main
+     element: app.js builds the entire board into it, so the HTML carries no data and no
+     duplicated markup. data.js must load first — it assigns window.RADAR, the whole dataset
+     — and app.js second, because app.js reads that assignment on its first line and returns
+     at once if it is missing. The noscript note is the only fallback: without JavaScript
+     there is no board, and the page says so plainly instead of showing an empty frame. The
+     skip link is for keyboard readers: it jumps straight to the board, past the header. -->
 <a class="skip" href="#board">Skip to the board</a>
 <main id="board" tabindex="-1" aria-busy="true"></main>
 <noscript><p class="noscript">Token Radar needs JavaScript: the board is rendered from the snapshot data beside this page.</p></noscript>
