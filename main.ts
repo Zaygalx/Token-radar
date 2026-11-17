@@ -1,4 +1,6 @@
 // Token Radar radar-2 (Node 22, standard library only).
+// One run turns the sealed snapshot into the ranked board, the dashboard data and the dossier
+// the judge reads.
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores
 // every pre-token protocol with the radar-2 model in lib/model.ts, writes the ranked board to
